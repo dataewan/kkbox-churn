@@ -3,67 +3,59 @@
 """Form subsets of the data to make it easier to process."""
 
 import csv
-import os
 import operator
+import os
+import sys
+import tqdm
 
 
 class Subset(object):
 
     """Form subsets of the data to make it easier to process."""
 
-    def __init__(self, filename, membershipfile, outfilename=None,
-                 header=True):
+    def __init__(self, filename, header=True):
         """Args:
             filename: the name of the file we want to make a subset of.
-            membershipfile: the file (either train or sample submission) that
-                contains the mnsos we want to extract.
-            outfilename: name of the file that we want to create. defaults to
-                `None`, in that case we figure out what filename we want.
             header: does the file we're making a subset of have a header.
                 Defaults to true.
         """
         self.filename = filename
-        self.membershipfile = membershipfile
-        self.outfilename = outfilename
         self.header = header
 
-        self.subset = set()
-
-        self.findsubsetusers()
+        self.trainusers = self.findsubsetusers('data/raw/train.csv')
+        self.testusers = self.findsubsetusers(
+            'data/raw/sample_submission_zero.csv'
+        )
         self.findoutputfile()
         self.form_subset()
 
-    def findsubsetusers(self):
+    @staticmethod
+    def findsubsetusers(membershipfile):
         """Find a set of users in the subset. Store these for validation
         later."""
-        with open(self.membershipfile, 'r') as infile:
+        subset = set()
+        with open(membershipfile, 'r') as infile:
             reader = csv.reader(infile)
             for row in reader:
                 msno = row[0]
-                self.subset.add(msno)
+                subset.add(msno)
+        return subset
 
     def findoutputfile(self):
         """Find out what the output file should be."""
-        if self.outfilename is not None:
-            self.outfile = open(self.outfilename, 'w')
-        else:
-            name_lookup = {
-                'train.csv': 'train',
-                'sample_submission_zero.csv': 'test'
-            }
-            member_basename = os.path.basename(self.membershipfile)
-            if member_basename not in name_lookup:
-                raise Exception(
-                    "Can't figure out if this is the test or the training set."
-                )
-            datadir = 'data/processed'
-            self.outfile = open(
-                os.path.join(
-                    datadir,
-                    name_lookup[member_basename] + "_" +
-                    os.path.basename(self.filename)
-                ), 'w'
-            )
+        datadir = 'data/processed'
+        trainfilename = os.path.join(
+            datadir,
+            "train_" + os.path.basename(self.filename)
+        )
+        testfilename = os.path.join(
+            datadir,
+            "test_" + os.path.basename(self.filename)
+        )
+        self.outfiles = {
+            'train': open(trainfilename, 'w'),
+            'test': open(testfilename, 'w')
+        }
 
     def form_subset(self):
         """Make the subset of the data. Read through every line in the
@@ -71,23 +63,32 @@ class Subset(object):
         output if it is."""
         infile = open(self.filename, 'r')
         reader = csv.reader(infile)
-        writer = csv.writer(self.outfile)
+        trainwriter = csv.writer(self.outfiles['train'])
+        testwriter = csv.writer(self.outfiles['test'])
 
         # write the header if we have one
         if self.header:
-            writer.writerow(next(reader))
+            header = next(reader)
+            trainwriter.writerow(header)
+            testwriter.writerow(header)
 
         # just now, assume that the first item in the row is going to be the
         # msno.
         msnogetter = operator.itemgetter(0)
 
-        for row in reader:
-            if msnogetter(row) in self.subset:
-                writer.writerow(row)
+        for row in tqdm.tqdm(reader):
+            if msnogetter(row) in self.trainusers:
+                trainwriter.writerow(row)
+            if msnogetter(row) in self.testusers:
+                testwriter.writerow(row)
 
         infile.close()
-        self.outfile.close()
+        for outfile in self.outfiles.values():
+            outfile.close()
 
 
 if __name__ == "__main__":
-    S = Subset('data/raw/members.csv', 'data/raw/train.csv')
+    if len(sys.argv) > 1:
+        S = Subset(sys.argv[1])
+    else:
+        S = Subset('data/raw/members.csv')
